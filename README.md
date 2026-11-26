@@ -28,4 +28,4 @@ Sievert, C., & Shirley, K. E. (2014). LDAvis: A method for visualizing and inter
 
 ## Reproducibility
 
-Code and analytical outputs are provided to support methodological transparency, independent assessment, and reproducibility in a large conspiracy corpus of > 1.02 million comments in a conspiracy theory forum.
+Code and analytical outputs are provided to support methodological transparency, independent assessment, and reproducibility in a large conspiracy corpus of >1.02 million comments in a conspiracy theory forum.
