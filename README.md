@@ -13,8 +13,9 @@ This repository contains the research code, analytical workflows, and associated
    - **Support topic interpretation:** Use the interactive term rankings alongside the existing topic keyword and frequency analyses.
 3. **COVID-19 Topic Analysis:** OLS regression models examining COVID-19-related topics, including variable transformations.
 4. **Political Dictionary Analyses:** 4 Lexicon-based political dictionary analyses (Puschmann & Haim, n.d.; original source: https://github.com/MarHai/content-analysis-with-r.com/blob/master/4-dictionaries.Rmd).
-5. **Extended Moral Foundations Dictionary Analysis:** Lexicon-based psycholinguistic analysis (Hopp et al., 2021; original source: https://github.com/medianeuroscience/emfd).
-6. **Robustness Checks for morality polarity:** Additional analyses assessing the stability and sensitivity of the findings.
+5. **Shannon Entropy, Segmented Regression, MannKendall and Sens slope:** 3 political dictionaries (i.e., policy_agendas_dict, lavergarry.lexicon & maerz.lexicon)
+6. **Extended Moral Foundations Dictionary Analysis:** Lexicon-based psycholinguistic analysis (Hopp et al., 2021; original source: https://github.com/medianeuroscience/emfd).
+7. **Robustness Checks for morality polarity:** Additional analyses assessing the stability and sensitivity of the findings.
 
 ## References
 
