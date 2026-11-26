@@ -18,13 +18,13 @@ This repository contains the research code, analytical workflows, and associated
 
 ## References
 
-Hopp, F. R., Fisher, J. T., Cornell, D., Huskey, R., & Weber, R. (2021). The extended Moral Foundations Dictionary (eMFD): Development and applications of a crowd-sourced approach to extracting moral intuitions from text. *Behavior Research Methods, 53*(1), 232–246. https://doi.org/10.3758/s13428-020-01433-0
+   - Hopp, F. R., Fisher, J. T., Cornell, D., Huskey, R., & Weber, R. (2021). The extended Moral Foundations Dictionary (eMFD): Development and applications of a crowd-sourced approach to extracting moral intuitions from text. *Behavior Research Methods, 53*(1), 232–246. https://doi.org/10.3758/s13428-020-01433-0
 
-medianeuroscience. (n.d.). *emfd: The Extended Moral Foundations Dictionary (eMFD)* [Computer software]. GitHub. Retrieved November 26, 2026, from https://github.com/medianeuroscience/emfd
+   - medianeuroscience. (n.d.). *emfd: The Extended Moral Foundations Dictionary (eMFD)* [Computer software]. GitHub. Retrieved November 26, 2026, from https://github.com/medianeuroscience/emfd
 
-Puschmann, C., & Haim, M. (n.d.). *Topic-specific dictionaries*. In *Automated content analysis with R*. https://content-analysis-with-r.com/4-dictionaries.html
+   - Puschmann, C., & Haim, M. (n.d.). *Topic-specific dictionaries*. In *Automated content analysis with R*. https://content-analysis-with-r.com/4-dictionaries.html
 
-Sievert, C., & Shirley, K. E. (2014). LDAvis: A method for visualizing and interpreting topics. In *Proceedings of the Workshop on Interactive Language Learning, Visualization, and Interfaces* (pp. 63–70). Association for Computational Linguistics. https://doi.org/10.3115/v1/W14-3110
+   - Sievert, C., & Shirley, K. E. (2014). LDAvis: A method for visualizing and interpreting topics. In *Proceedings of the Workshop on Interactive Language Learning, Visualization, and Interfaces* (pp. 63–70). Association for Computational Linguistics. https://doi.org/10.3115/v1/W14-3110
 
 ## Reproducibility
 
