@@ -13,4 +13,4 @@ This repository contains the research code, analytical workflows, and associated
 
 ## Reproducibility
 
-Code and analytical outputs are provided to support methodological transparency, independent assessment, and reproducibility in a large conspiracy corpus of over 1 million comments in a conspiracy theory forum.
+Code and analytical outputs are provided to support methodological transparency, independent assessment, and reproducibility in a large conspiracy corpus of > 1.02 million comments in a conspiracy theory forum.
