@@ -6,7 +6,7 @@ This repository contains the research code, analytical workflows, and associated
 
 1. **Topic Modelling:** Code for LDA (200 topics).
 2. **COVID-19 Topic Analysis:** OLS regression models examining COVID-19-related topics, including variable transformations.
-3. **Political Dictionary Analyses:** 4 Lexicon-based political dictionary analyses
+3. **Political Dictionary Analyses:** 4 Lexicon-based political dictionary analyses (original source: https://github.com/MarHai/content-analysis-with-r.com/blob/master/4-dictionaries.Rmd)
 4. **Extended Moral Foundations Dictionary Analysis:** Lexicon-based psycholinguistic analysis (original source: https://github.com/medianeuroscience/emfd)
 5. **Robustness Checks for morality polarity:** Additional analyses assessing the stability and sensitivity of the findings.
    
