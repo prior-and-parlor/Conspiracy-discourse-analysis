@@ -5,7 +5,7 @@ from matplotlib import pyplot as plt
 
 
 '''loading data'''
-template_input = pd.read_csv('./CleanedTexts_9Nov2023.csv')
+template_input = pd.read_csv('./CleanedConspiracyTexts.csv')
 template_input.head()
 
 '''renaming column and dropping unnecessary columns'''
