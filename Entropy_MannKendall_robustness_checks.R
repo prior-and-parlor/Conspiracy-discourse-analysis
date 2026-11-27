@@ -10,7 +10,7 @@ suppressPackageStartupMessages({
 # ---------------------------------------------------------------------
 # 0. FILE PATHS
 # ---------------------------------------------------------------------
-dir_cfa <- "C:/Users/abiga/OneDrive/Desktop/CFA"
+dir_cfa <- "....."
 lg_file <- file.path(dir_cfa, "output_lavergarry.lexicon.xlsx")
 mz_file <- file.path(dir_cfa, "output_maerz.lexicon.xlsx")
 pc_file <- file.path(dir_cfa, "output_policy_agendas_dict.xlsx")
