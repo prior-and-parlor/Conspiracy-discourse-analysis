@@ -1,15 +1,9 @@
-# Moral polarity analysis (vice - virtue)
-# Monthly data from June 2019 to November 2020 (18 observations).
-#
-# The reduced model is the primary analysis. The interaction model is
-# supplementary because the two election months have leverage of 1. Its
-# coefficients are reported as OLS estimates only; event effects are
-# summarised for the months observed in the data.
-#
-# The script also runs bootstrap, sensitivity, equivalence, Bayesian and
-# effect-size analyses. The optional brms analysis is off by default.
-#
-# Run with: source("moral_polarity_revised_v2.R", echo = TRUE)
+# Moral polarity (vice - virtue) over 18 months, r/conspiracy.
+# Primary model: delta ~ time + covid + blm + election (reduced, no interactions).
+# The full interaction model is in the supplement only: the two election
+# months have leverage of 1, so those terms can't be interpreted.
+# Dates in the CSV are day-first with mixed 2/4-digit years, hence dmy().
+# Run top to bottom: source("moral_polarity.R", echo = TRUE)
 
 suppressPackageStartupMessages({
   library(readr); library(dplyr); library(tidyr); library(lubridate)
@@ -22,39 +16,31 @@ if (!has_bf) message("BayesFactor not installed: install.packages(\"BayesFactor\
 
 set.seed(2026)
 
-# Settings
-
+# ---------------------------------------------------------------------
+# SETTINGS
+# ---------------------------------------------------------------------
 DATA_FILE      <- "all-vv-updated.csv"   # relative path
 OUT_DIR        <- "outputs"
-NW_LAG         <- 2        # Main HAC lag; lags 1-4 are checked below.
+NW_LAG         <- 2        # one value, used everywhere. Rule of thumb
+# floor(0.75 * n^(1/3)) to ceiling = 1-2 for n = 18;
+# lags 1-4 are reported in hac_lag_sensitivity.csv.
 B_BOOT         <- 5000     # wild bootstrap draws
 B_BAYES        <- 10000    # posterior draws per Bayesian model/prior specification
 B_SIM          <- 5000     # simulation draws per grid point (lower for a test run)
-SESOI_TOTAL_SD <- 0.5      # Equivalence bound: total change across the window, in SD units.
-RUN_BRMS       <- FALSE    # Set TRUE only when the brms/Stan toolchain is available
+SESOI_TOTAL_SD <- 0.5      # smallest effect of interest: total change over the
+# window in SD units. PLACEHOLDER: justify in the paper.
+RUN_BRMS       <- FALSE    # brms needs a Stan toolchain; blocked on your machine
 MAKE_FIGURE    <- TRUE
 WINDOW_START   <- as.Date("2019-06-01")
 WINDOW_END     <- as.Date("2020-11-01")   # month-start date of the last month
-BASELINE_N     <- 7        # Phase 1 = Jun-Dec 2019 
+BASELINE_N     <- 7        # Phase 1 = Jun-Dec 2019 (matches the manuscript)
 dir.create(OUT_DIR, showWarnings = FALSE)
-write_csv_console <- function(x, filename) {
-  out_file <- file.path(OUT_DIR, filename)
-  
-  utils::write.csv(x, out_file, row.names = FALSE)
-  
-  cat("\n", strrep("=", 80), "\n", sep = "")
-  cat("CSV RESULTS: ", filename, "\n", sep = "")
-  cat(strrep("=", 80), "\n")
-  
-  print(as.data.frame(x), row.names = FALSE, max = nrow(x))
-  
-  cat("\nSaved to: ", normalizePath(out_file), "\n\n", sep = "")
-  
-  invisible(out_file)
-}
 
-# Primary event windows. January 2020 is not coded as COVID-19, and May 2020
-# is not coded as BLM; alternative windows are checked below.
+
+# Event coding, month by month (printed below so it can go in
+# the Method verbatim). Decide deliberately: the PHEIC was 30 Jan 2020 (so Jan
+# could be coded COVID) and G. Floyd died 25 May 2020 (so May could be BLM).
+# The alternative coding is run as a sensitivity analysis in section 3e.
 COVID_MONTHS    <- as.Date(c("2020-02-01", "2020-03-01", "2020-04-01", "2020-05-01"))
 BLM_MONTHS      <- as.Date(c("2020-06-01", "2020-07-01", "2020-08-01"))
 ELECTION_MONTHS <- as.Date(c("2020-10-01", "2020-11-01"))
@@ -64,7 +50,7 @@ foundation_vars <- c(
   "care.virtue", "fairness.virtue", "loyalty.virtue", "authority.virtue", "sanctity.virtue"
 )
 
-# Get Newey-West estimates with the small-sample adjustment.
+# Small helper: Newey-West table with small-sample adjustment and t critical values
 nw_tab <- function(m, lag) {
   ct   <- coeftest(m, vcov = NeweyWest(m, lag = lag, prewhite = FALSE, adjust = TRUE))
   crit <- qt(.975, df.residual(m))
@@ -72,8 +58,9 @@ nw_tab <- function(m, lag) {
              lo = ct[, 1] - crit * ct[, 2], hi = ct[, 1] + crit * ct[, 2], row.names = NULL)
 }
 
-# 1. Preparing the monthly data
-
+# ---------------------------------------------------------------------
+# 1. DATA: ONE ROW PER MONTH
+# ---------------------------------------------------------------------
 df <- read_csv(DATA_FILE, show_col_types = FALSE, name_repair = "unique_quiet",
                col_types = cols(date = col_character()))
 cat("\n== Raw data ==\n")
@@ -90,13 +77,14 @@ if (nrow(outside) > 0) {
   df <- df %>% filter(month >= WINDOW_START, month <= WINDOW_END)
 }
 
-# Check the number of comments and calendar days represented in each month.
+# Coverage per month (answers Reviewer 2's request for retained N, and shows
+# thin or gappy months). Report this as a supplementary table.
 cover <- df %>%
   group_by(month) %>%
   summarise(n_comments = n(), n_days = n_distinct(date), .groups = "drop") %>%
   mutate(days_in_month = lubridate::days_in_month(month),
          pct_days = round(100 * n_days / days_in_month),
-         # Flag months with low comment volume or incomplete day coverage.
+         # thin = under half the median monthly volume, or under 60% of the days covered
          flag_thin = n_comments < 0.5 * median(n_comments) | pct_days < 60)
 cat("\n== Comments per month ==\n"); print(as.data.frame(cover))
 cat("Months with ANY uncovered day:", sum(cover$n_days < cover$days_in_month), "of", nrow(cover),
@@ -119,8 +107,9 @@ long <- df_month %>%
   mutate(z = as.numeric(scale(score))) %>%
   ungroup()
 
-# Delta is the difference between the mean z-scores for vice and virtue.
-# It tracks their relative movement, not an absolute level of vice dominance.
+# Delta = mean z(vice) - mean z(virtue); mean 0 by construction, so it measures
+# change in divergence, not "vice dominance". Raw means are not comparable
+# across vice and virtue word lists.
 delta_df <- long %>%
   group_by(month, system) %>%
   summarise(z = mean(z, na.rm = TRUE), .groups = "drop") %>%
@@ -145,8 +134,9 @@ cat("Reference (no event) months:", format(delta_df$month[rowSums(delta_df[, c("
 cat("SD of delta:", round(sd(delta_df$delta), 3), "\n")
 write.csv(delta_df, file.path(OUT_DIR, "delta_monthly_series.csv"), row.names = FALSE)
 
-# Primary regression model
-
+# ---------------------------------------------------------------------
+# 2. PRIMARY MODEL (reduced: no interactions; 5 parameters, 13 residual df)
+# ---------------------------------------------------------------------
 f_red <- delta ~ time + covid + blm + election
 m_red <- lm(f_red, data = delta_df)
 cat("\n== PRIMARY: reduced model ==\n")
@@ -159,12 +149,11 @@ names(red_tab)[names(red_tab) %in% c("se", "p")] <- c("se_hac", "p_hac")   # t, 
 red_tab$se_ols <- summary(m_red)$coefficients[, 2]
 red_tab$p_ols  <- summary(m_red)$coefficients[, 4]
 red_tab$p_hc3  <- coeftest(m_red, vcov = vcovHC(m_red, type = "HC3"))[, 4]
-# With 18 observations, compare OLS, HC3 and HAC results rather than relying
-# on a single standard-error estimate. Bootstrap intervals are reported below.
+
 print(red_tab, digits = 4)
 write.csv(red_tab, file.path(OUT_DIR, "Table2_reduced_HAC.csv"), row.names = FALSE)
 
-# Check residual autocorrelation and whether results change with the HAC lag.
+
 cat("\n-- Residual autocorrelation, reduced model --\n")
 print(bgtest(m_red, order = 1)); print(dwtest(m_red))
 cat("Lag-1 residual autocorrelation:", round(acf(resid(m_red), plot = FALSE, lag.max = 1)$acf[2], 3), "\n")
@@ -174,17 +163,17 @@ write.csv(lag_tab, file.path(OUT_DIR, "hac_lag_sensitivity.csv"), row.names = FA
 cat("\n-- HAC lag sensitivity (p-values, reduced model) --\n")
 print(reshape(lag_tab[, c("lag", "term", "p")], idvar = "term", timevar = "lag", direction = "wide"), digits = 3)
 
-# Save a Word version of Table 2 when modelsummary is available.
+# Word export of Table 2 
 if (has_ms) {
   v_nw_red <- NeweyWest(m_red, lag = NW_LAG, prewhite = FALSE, adjust = TRUE)
   try(modelsummary::modelsummary(
-        setNames(list(m_red, m_red), c("Reduced, OLS", paste0("Reduced, HAC (lag ", NW_LAG, ")"))),
-        vcov = list(NULL, v_nw_red), statistic = "({std.error})", stars = TRUE, fmt = 3,
-        gof_map = c("nobs", "r.squared", "adj.r.squared"),
-        output = file.path(OUT_DIR, "Table2_reduced.docx")), silent = TRUE)
+    setNames(list(m_red, m_red), c("Reduced, OLS", paste0("Reduced, HAC (lag ", NW_LAG, ")"))),
+    vcov = list(NULL, v_nw_red), statistic = "({std.error})", stars = TRUE, fmt = 3,
+    gof_map = c("nobs", "r.squared", "adj.r.squared"),
+    output = file.path(OUT_DIR, "Table2_reduced.docx")), silent = TRUE)
 }
 
-# Supplementary model with time-by-event interactions. Interpret cautiously.
+# ---- Supplement: full model with interactions 
 f_full <- delta ~ time + covid + blm + election + time:covid + time:blm + time:election
 m_full <- lm(f_full, data = delta_df)
 cat("\n== SUPPLEMENT: full model (", length(coef(m_full)), "parameters,", df.residual(m_full), "residual df) ==\n")
@@ -195,8 +184,8 @@ if (any(lev > 0.99)) {
   cat("HC1/HAC/bootstrap SEs are degenerate here (election SEs equal the intercept's) and are not reported.\n")
 }
 print(summary(m_full)$coefficients)   # OLS only; coefficients for election terms are not interpretable
-# Time = 0 is outside the observed period, so summarise event effects at
-# the months represented in the data.
+# Main-effect coefficients here refer to time = 0 (outside the data). What matters is the
+# implied event effect at the months actually observed:
 b <- coef(m_full)
 ev_months <- list(covid = delta_df$time[delta_df$covid == 1],
                   blm = delta_df$time[delta_df$blm == 1],
@@ -205,8 +194,9 @@ me_full <- sapply(names(ev_months), function(e)
   mean(b[[e]] + b[[paste0("time:", e)]] * ev_months[[e]]))
 cat("Mean event effect at the observed months (full model):\n"); print(round(me_full, 3))
 
-# Wild bootstrap for the reduced model
-
+# ---------------------------------------------------------------------
+# 2b. WILD BOOTSTRAP (Webb weights, leverage-adjusted), reduced model
+# ---------------------------------------------------------------------
 wild_boot <- function(model, B = 5000) {
   X <- model.matrix(model); y <- model.response(model.frame(model))
   XtXi <- solve(crossprod(X)); beta <- as.vector(XtXi %*% crossprod(X, y))
@@ -226,9 +216,44 @@ wb_tab <- data.frame(term = colnames(wb), estimate = coef(m_red),
 wb_tab$ci_excludes_zero <- wb_tab$ci_low > 0 | wb_tab$ci_high < 0
 cat("\n== Wild-bootstrap 95% percentile intervals (reduced model) ==\n"); print(wb_tab)
 write.csv(wb_tab, file.path(OUT_DIR, "wild_bootstrap_ci_reduced.csv"), row.names = FALSE)
+# Combine estimates and inference across the different estimators
 
-# Leave-one-month-out check
+lag_wide <- lag_tab %>%
+  filter(term != "(Intercept)") %>%
+  select(lag, term, p) %>%
+  pivot_wider(
+    names_from = lag,
+    values_from = p,
+    names_prefix = "p_hac_lag"
+  )
 
+est_cmp <- red_tab %>%
+  filter(term != "(Intercept)") %>%
+  select(term, b = est, p_ols, p_hc3) %>%
+  left_join(lag_wide, by = "term") %>%
+  left_join(
+    wb_tab %>%
+      select(
+        term,
+        wb_lo = ci_low,
+        wb_hi = ci_high,
+        wb_excludes_zero = ci_excludes_zero
+      ),
+    by = "term"
+  )
+
+cat("\n== Estimator comparison, reduced model ==\n")
+print(as.data.frame(est_cmp), digits = 3)
+
+write.csv(
+  est_cmp,
+  file.path(OUT_DIR, "estimator_comparison_reduced.csv"),
+  row.names = FALSE
+)
+
+# ---------------------------------------------------------------------
+# 3a. LEAVE-ONE-MONTH-OUT (reduced model)
+# ---------------------------------------------------------------------
 loo <- do.call(rbind, lapply(seq_len(n), function(i) {
   s <- summary(lm(f_red, data = delta_df[-i, ]))$coefficients
   data.frame(dropped = format(delta_df$month[i], "%b %Y"), term = rownames(s),
@@ -242,15 +267,16 @@ cat("\n== Leave-one-month-out (reduced model; OLS p) ==\n"); print(as.data.frame
 write.csv(loo, file.path(OUT_DIR, "leave_one_out_all.csv"), row.names = FALSE)
 write.csv(loo_sum, file.path(OUT_DIR, "leave_one_out_summary.csv"), row.names = FALSE)
 
-# Placebo breakpoints
-
+# ---------------------------------------------------------------------
+# 3b. PLACEBO BREAKPOINTS
+# ---------------------------------------------------------------------
 break_stat <- function(cut) {
   d <- delta_df; d$post <- as.integer(d$month >= cut)
   s <- summary(lm(delta ~ time + post, data = d))$coefficients["post", ]
   c(est = s[[1]], t = s[[3]])
 }
 actual_cut <- as.Date("2020-01-01")
-cand_cuts  <- delta_df$month[4:(n - 3)]
+cand_cuts  <- delta_df$month[4:(n - 2)]  # At least 3 months on each side
 plc <- t(sapply(cand_cuts, break_stat))
 plc <- data.frame(cut = cand_cuts, plc, abs_t = abs(plc[, "t"]))
 t_actual <- abs(break_stat(actual_cut)[["t"]])
@@ -259,28 +285,28 @@ cat(sprintf("|t| at 1 Jan 2020 = %.2f; share of candidate cuts with |t| >= this:
             t_actual, mean(plc$abs_t >= t_actual)))
 write.csv(plc, file.path(OUT_DIR, "placebo_breakpoints.csv"), row.names = FALSE)
 
-# Simulation-based sensitivity analysis
-# Uses the full primary-model design and Newey-West inference.
+# ---------------------------------------------------------------------
+# 3c. Power simulations
+# ---------------------------------------------------------------------
+# Refit the primary model on AR(1) noise (sigma and rho taken from m_red),
+# vary one coefficient at a time with the others held at their estimates,
+# and count how often the HAC test rejects. Conditional on this design, so
+# read it as sensitivity, not as study power.
+# ---------------------------------------------------------------------
 
-# The simulations use all 18 months and the full primary model. Each
-# coefficient is varied in turn while the other terms remain at their fitted
-# values. Errors follow an AR(1) process estimated from the model residuals,
-# and tests use the same HAC settings as the main analysis. These are
-# conditional sensitivity estimates, not retrospective power calculations.
-
-# Simulation settings
+# ---- Simulation settings -------------------------------------------
 
 ALPHA_SIM <- 0.05
 TARGET_POWER <- 0.80
 
-# Effect grids use residual-SD units: per month for the trend and as a level
-# shift for each event indicator.
+# Maximum effect sizes explored:
+# Trend = residual SD per month
+# Events = residual SD for the event-period level shift
 SLOPE_MAX_RESID_SD <- 0.30
 EVENT_MAX_RESID_SD <- 4.00
 
 N_GRID <- 31
 
-# Estimate the residual variance and lag-1 correlation
 
 sigma_sim <- summary(m_red)$sigma
 
@@ -288,7 +314,8 @@ rho_sim <- as.numeric(
   acf(resid(m_red), plot = FALSE, lag.max = 1)$acf[2]
 )
 
-# Keep rho within a stationary range.
+# Keep the AR(1) parameter within a stationary, numerically
+# reasonable range
 rho_sim <- max(min(rho_sim, 0.90), -0.50)
 
 cat("\n== Design-matched simulation settings ==\n")
@@ -300,11 +327,11 @@ cat("Estimated residual AR(1) rho:", round(rho_sim, 3), "\n")
 cat("Newey-West lag:", NW_LAG, "\n")
 cat("Simulations per effect size:", B_SIM, "\n")
 
-# Generate AR(1) errors
 
 sim_noise_primary <- function() {
   
-  # Convert the marginal residual SD to the innovation SD required by arima.sim().
+  # sigma_sim is the marginal residual SD.
+  # Convert it to the innovation SD required by arima.sim().
   innovation_sd <- sigma_sim * sqrt(1 - rho_sim^2)
   
   if (abs(rho_sim) < 1e-8) {
@@ -320,9 +347,10 @@ sim_noise_primary <- function() {
   )
 }
 
-# Test each simulated coefficient
 
-# Use the same Newey-West settings and residual degrees of freedom as the main model.
+# Calculate a two-sided HAC p-value using the same Newey-West
+# specification as the primary analysis and a t reference with
+# the model's residual degrees of freedom.
 
 get_hac_p_sim <- function(y, target) {
   
@@ -357,7 +385,6 @@ get_hac_p_sim <- function(y, target) {
   )
 }
 
-# Simulate rejection rates for one coefficient
 
 simulate_primary_power <- function(
     target,
@@ -369,7 +396,8 @@ simulate_primary_power <- function(
     target %in% c("time", "covid", "blm", "election")
   )
   
-  # Keep the design fixed and hold the other coefficients at their fitted values.
+  # Retain the complete primary-model design.
+  # Other coefficients are held at their observed estimates.
   X <- model.matrix(m_red)
   
   beta_base <- coef(m_red)
@@ -378,10 +406,10 @@ simulate_primary_power <- function(
     
     beta_sim <- beta_base
     
-    # Change only the coefficient being tested.
+    # Vary only the coefficient being evaluated.
     beta_sim[target] <- effect
     
-    # Calculate the expected outcome for these coefficient values.
+    # Expected outcome under the specified coefficient values.
     mu <- as.numeric(X %*% beta_sim)
     
     p_values <- replicate(B, {
@@ -406,10 +434,10 @@ simulate_primary_power <- function(
   do.call(rbind, results)
 }
 
-# Set up the effect-size grids
 
-# Time runs from 1 to 18. Multiply the slope by 17 intervals to get the
-# total fitted change across the study period.
+# The original time variable is coded 1 to 18.
+# Therefore, the total predicted trend change is:
+# slope coefficient * (18 - 1).
 
 slope_grid <- sigma_sim * seq(
   0,
@@ -417,14 +445,14 @@ slope_grid <- sigma_sim * seq(
   length.out = N_GRID
 )
 
-# Event effects are conditional on the other terms in the model.
+# Event coefficients represent the difference between the event
+# months and the reference months, conditional on the other terms.
 event_grid <- sigma_sim * seq(
   0,
   EVENT_MAX_RESID_SD,
   length.out = N_GRID
 )
 
-# Run the simulations for each model term
 
 cat("\n== Running design-matched simulations ==\n")
 
@@ -448,7 +476,6 @@ pw_election <- simulate_primary_power(
   effects = event_grid
 )
 
-# Express the simulated effects in SD units
 
 pw_time <- pw_time %>%
   mutate(
@@ -475,7 +502,6 @@ pw_election <- pw_election %>%
     effect_residual_SD = effect / sigma_sim
   )
 
-# Combine the simulation results
 
 power_curves <- bind_rows(
   pw_time,
@@ -484,9 +510,10 @@ power_curves <- bind_rows(
   pw_election
 )
 
-# Find the first effect size to reach the target rejection rate
 
-# Report the first grid point to reach 80%; do not extrapolate beyond the grid.
+# Return the first grid point reaching the target power.
+# If the simulation grid does not reach 80%, report NA rather
+# than extrapolating beyond the simulated range.
 
 extract_mde <- function(tab, coefficient, effect_column) {
   
@@ -558,7 +585,6 @@ cat("All effects tested using the complete primary model.\n")
 cat("Inference: Newey-West HAC, lag =", NW_LAG, "\n")
 print(mde_primary, digits = 3, row.names = FALSE)
 
-# Save the simulation results
 
 write.csv(
   power_curves,
@@ -572,7 +598,6 @@ write.csv(
   row.names = FALSE
 )
 
-# Plot the simulated power
 
 if (requireNamespace("ggplot2", quietly = TRUE)) {
   
@@ -658,8 +683,10 @@ if (requireNamespace("ggplot2", quietly = TRUE)) {
 cat("\nDesign-matched simulation completed.\n")
 cat("Results saved to:", normalizePath(OUT_DIR), "\n")
 
-# TOST equivalence tests
 
+# ---------------------------------------------------------------------
+# 3d. TOST EQUIVALENCE TESTS: delta and each of the ten foundation series
+# ---------------------------------------------------------------------
 tost_slope <- function(y, sesoi_sd = SESOI_TOTAL_SD) {
   t <- seq_along(y); m <- lm(y ~ t); nn <- length(y)
   bound <- sesoi_sd * sd(y) / (nn - 1)
@@ -677,7 +704,9 @@ cat("\n== TOST on the linear time slope (HC3 SE; bounds = +/-", SESOI_TOTAL_SD, 
 print(tost_all, digits = 3)
 write.csv(tost_all, file.path(OUT_DIR, "tost_slopes.csv"), row.names = FALSE)
 
-# Sensitivity to event coding and incomplete months
+# ---------------------------------------------------------------------
+# 3e. SENSITIVITY OF THE PRIMARY MODEL TO EVENT CODING AND THIN MONTHS
+# ---------------------------------------------------------------------
 
 fit_sens <- function(d, label) {
   m <- lm(f_red, data = d)
@@ -690,9 +719,10 @@ fit_sens <- function(d, label) {
   )
 }
 
-# Alternative windows follow the event periods shown in the figure. A month
-# is included if it overlaps an event period, so May 2020 is included in both
-# the COVID-19 and BLM indicators.
+# Alternative event coding aligned with Figure event windows.
+# Monthly observations are coded 1 if any part of the month
+# overlaps the relevant event period.
+# May 2020 is intentionally included in both COVID-19 and BLM.
 
 alt <- delta_df
 
@@ -711,7 +741,7 @@ alt$election <- as.integer(
     alt$month <= as.Date("2020-11-01")
 )
 
-# Compare the primary and alternative event coding.
+# Fit primary and alternative event-coding models.
 
 sens <- rbind(
   fit_sens(delta_df, "Primary event coding"),
@@ -720,7 +750,8 @@ sens <- rbind(
     "Alternative coding: COVID Jan-May; BLM May-Aug; Election Oct-Nov"
   ),
   
-  # Check whether the estimates change when March or September 2020 is removed.
+  # Individual-month deletion checks:
+  # assess whether results are sensitive to either observation.
   
   fit_sens(
     delta_df[delta_df$month != as.Date("2020-03-01"), ],
@@ -733,7 +764,8 @@ sens <- rbind(
   )
 )
 
-# Refit the model after excluding months with low volume or coverage.
+# Data-driven thin-month sensitivity:
+# exclude months flagged by comment-volume and day-coverage criteria.
 
 if (length(thin_months) > 0 && length(thin_months) < n - 8) {
   sens <- rbind(
@@ -762,13 +794,17 @@ write.csv(
   row.names = FALSE
 )
 
-# Bayesian analyses
+# ---------------------------------------------------------------------
+# 4. BAYESIAN ANALYSES (BayesFactor needs no Stan)
+# ---------------------------------------------------------------------
 
-# Run the BayesFactor comparisons on the monthly series prepared above.
-# These include predictor and model comparisons, posterior estimates for
-# the four terms in the primary model, and a separate time-only slope. The
-# time-only slope is not adjusted for the event indicators. BF01 values above
-# 1 favour the simpler model; values below 1 favour the more complex model.
+# All analyses use dm, constructed directly from delta_df above.
+# No CSV is re-imported.
+# Bayes factors and posteriors via BayesFactor (no Stan needed).
+# BF01 > 1 favours the simpler model.
+# BF01 > 1 favours the simpler/reduced model.
+# BF01 < 1 favours the more complex model.
+# ---------------------------------------------------------------------
 
 dm <- as.data.frame(
   delta_df[, c("delta", "time", "covid", "blm", "election")]
@@ -802,8 +838,10 @@ if (!has_bf) {
   
   tryCatch({
     
-    # Return BF10 for a linear model.
-
+    # ---------------------------------------------------------------
+    # Common helper: extract BF10 from a specified linear model
+    # ---------------------------------------------------------------
+    
     bf10_of <- function(formula, rscale) {
       
       fit_bf <- BayesFactor::lmBF(
@@ -818,8 +856,10 @@ if (!has_bf) {
       )
     }
     
-    # Specify the models to compare.
-
+    # ---------------------------------------------------------------
+    # Define the nested models
+    # ---------------------------------------------------------------
+    
     predictors <- c("time", "covid", "blm", "election")
     
     f_null <- delta ~ 1
@@ -834,9 +874,20 @@ if (!has_bf) {
       time + covid + blm + election +
       t_covid + t_blm + t_elec
     
-    # Predictor-level Bayes factors
-    # Compare the full model with a model omitting one predictor at a time.
-    # BF01 above 1 favours the model without that predictor.
+    # ---------------------------------------------------------------
+    # A1. PREDICTOR-LEVEL BAYES FACTORS
+    # ---------------------------------------------------------------
+    #
+    # For each predictor:
+    # Compare the model excluding that predictor against the
+    # complete four-predictor primary model.
+    #
+    # BF01_excluding_vs_full > 1:
+    # Evidence favours excluding that predictor.
+    #
+    # BF01_excluding_vs_full < 1:
+    # Evidence favours retaining that predictor.
+    # ---------------------------------------------------------------
     
     cat("\n== A1. Predictor-level Bayes factors ==\n")
     
@@ -879,7 +930,9 @@ if (!has_bf) {
       row.names = FALSE
     )
     
-    # Model-level Bayes factors
+    # ---------------------------------------------------------------
+    # A2. MODEL-LEVEL BAYES FACTORS
+    # ---------------------------------------------------------------
     
     cat("\n== A2. Model-level Bayes factors ==\n")
     
@@ -918,7 +971,21 @@ if (!has_bf) {
       row.names = FALSE
     )
     
-    # Posterior estimates for the four terms in the primary model
+    # ---------------------------------------------------------------
+    # A3. POSTERIOR COEFFICIENT ESTIMATES: FOUR PREDICTORS
+    # ---------------------------------------------------------------
+    #
+    # Posterior distributions are obtained from the complete
+    # primary reduced model.
+    #
+    # Report:
+    # - posterior median
+    # - 95% credible interval
+    # - posterior probability that the coefficient is positive
+    #
+    # These are conditional coefficients from the same model,
+    # not separate univariate regressions.
+    # ---------------------------------------------------------------
     
     cat("\n== A3. Posterior estimates for four predictors ==\n")
     
@@ -986,8 +1053,17 @@ if (!has_bf) {
       row.names = FALSE
     )
     
-    # Time-only posterior slope
-    # This is a separate model, not the adjusted time coefficient above.
+    # ---------------------------------------------------------------
+    # A3b. TIME-ONLY POSTERIOR SLOPE
+    # ---------------------------------------------------------------
+    #
+    # This is a separate univariate time-only model.
+    # It is not the same estimand as the conditional time coefficient
+    # in A3, which adjusts for the three event indicators.
+    #
+    # Explicitly set rscaleCont = 0.354 to make the prior specification
+    # transparent and reproducible.
+    # ---------------------------------------------------------------
     
     cat("\n== A3b. Time-only posterior slope ==\n")
     
@@ -1049,8 +1125,10 @@ if (!has_bf) {
       row.names = FALSE
     )
     
-    # Record that the Bayesian analyses completed.
-
+    # ---------------------------------------------------------------
+    # Completion status and interpretation reminder
+    # ---------------------------------------------------------------
+    
     bayes_ok <- TRUE
     
     cat("\nBayesian analyses completed successfully.\n")
@@ -1086,7 +1164,9 @@ if (!has_bf) {
   })
 }
 
-# Optional brms analysis (off by default)
+# ---------------------------------------------------------------
+# Optional BRMS extension
+# ---------------------------------------------------------------
 
 if (has_brm && RUN_BRMS) {
   
@@ -1168,11 +1248,12 @@ if (has_brm && RUN_BRMS) {
   
 }
 
-# 5. Effect sizes and temporal trends
-
-# Percentage change is relative to the mean for the first seven months (Phase 1).
-# Kendall's test does not account for autocorrelation. The lag-1 ACF is
-# reported to help assess this when interpreting the p-value.
+# ---------------------------------------------------------------------
+# 5. EFFECT SIZES (polarity and the ten foundations)
+# ---------------------------------------------------------------------
+# Percent change is relative to the mean of the first `baseline_n` months (Phase 1).
+# Kendall p is the plain test with no autocorrelation correction: look at acf1;
+# if it is large, use a corrected Mann-Kendall and say which one in the Method.
 effect_sizes <- function(y, time = seq_along(y), baseline_n = BASELINE_N, pct = TRUE) {
   nn <- length(y); span <- max(time) - min(time)
   b  <- unname(coef(lm(y ~ time))[2])
@@ -1193,11 +1274,41 @@ cat("\n== Effect sizes: moral polarity ==\n");  print(es_delta, digits = 3)
 cat("\n== Effect sizes: ten foundation series (raw monthly means) ==\n"); print(es_found, digits = 3)
 write.csv(es_delta, file.path(OUT_DIR, "effect_sizes_delta.csv"), row.names = FALSE)
 write.csv(es_found, file.path(OUT_DIR, "effect_sizes_foundations.csv"), row.names = FALSE)
-# This function can also be used with other monthly series, such as populism
-# or liberalism, when the input is a numeric vector.
 
-# 6. Plot the monthly series
+# OLS trends for the ten moral foundation series
 
+ols_found <- do.call(rbind, lapply(foundation_vars, function(v) {
+  y <- df_month[[v]]
+  tt <- seq_along(y)
+  m <- lm(y ~ tt)
+  cf <- summary(m)$coefficients["tt", ]
+  
+  data.frame(
+    series = v,
+    b = cf[[1]],
+    se = cf[[2]],
+    t = cf[[3]],
+    p = cf[[4]],
+    r2 = summary(m)$r.squared,
+    row.names = NULL
+  )
+}))
+
+ols_found$p_fdr <- p.adjust(ols_found$p, method = "BH")
+
+cat("\n== OLS month trends, ten foundation series (t on 16 df) ==\n")
+print(ols_found, digits = 4)
+
+write.csv(
+  ols_found,
+  file.path(OUT_DIR, "foundation_ols_trends.csv"),
+  row.names = FALSE
+)
+
+
+# ---------------------------------------------------------------------
+# 6. FIGURE
+# ---------------------------------------------------------------------
 if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespace("patchwork", quietly = TRUE)) {
   library(ggplot2); library(patchwork)
   
@@ -1208,7 +1319,6 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
   names(event_df)[2:3] <- c("xmin", "xmax")
   event_df$xmin <- as.Date(event_df$xmin); event_df$xmax <- as.Date(event_df$xmax)
   
-  # Colours used for the event windows and moral foundations.
   event_cols <- c("COVID-19" = "#003366", "BLM" = "#800000", "Election" = "#E69F00")
   col_map <- c("Vice" = "#A23B3B", "Virtue" = "#2C6E91"); dark_green <- "#1B5E20"
   
@@ -1241,8 +1351,10 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
       plot.tag = element_text(face = "bold", size = 11)
     )
   
-  # Panel A: foundation-level trajectories
-
+  # ---------------------------------------------------------------
+  # PANEL A: FOUNDATION-LEVEL TRAJECTORIES
+  # ---------------------------------------------------------------
+  
   p1 <- ggplot(long, aes(month, z, colour = system, group = system)) + bands +
     geom_line(linewidth = 0.65) +
     geom_point(size = 1.5) +
@@ -1256,8 +1368,10 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
       plot.tag.position = c(0, 1)
     )
   
-  # Panel B: vice-virtue difference
-
+  # ---------------------------------------------------------------
+  # PANEL B: VICE-VIRTUE DELTA
+  # ---------------------------------------------------------------
+  
   p2 <- ggplot(delta_df, aes(month, delta)) + bands +
     geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
     geom_line(colour = dark_green, linewidth = 0.75) +
@@ -1271,8 +1385,10 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
       plot.tag.position = c(0, 1.1)
     )
   
-  # Panel C: month-to-month change in delta
-
+  # ---------------------------------------------------------------
+  # PANEL C: MONTH-TO-MONTH CHANGE IN DELTA
+  # ---------------------------------------------------------------
+  
   delta_df$delta_change <- c(NA, diff(delta_df$delta))
   
   p3 <- ggplot(delta_df, aes(month, delta_change)) + bands +
@@ -1288,8 +1404,10 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
       plot.tag.position = c(0, 1.1)
     )
   
-  # Combine the three panels
-
+  # ---------------------------------------------------------------
+  # COMBINE PANELS
+  # ---------------------------------------------------------------
+  
   final_plot <- (p1 / patchwork::plot_spacer() / p2 /
                    patchwork::plot_spacer() / p3) +
     plot_layout(
@@ -1308,12 +1426,9 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
       plot.tag = element_text(face = "bold", size = 11)
     )
   
-  # Display the figure
-
   print(final_plot)
   
-  # Save the figure
-
+  
   ggsave(file.path(OUT_DIR, "FINAL_FIGURE.png"), final_plot,
          width = 7.2, height = 10, units = "in", dpi = 600, bg = "white")
   
@@ -1328,603 +1443,4 @@ if (MAKE_FIGURE && requireNamespace("ggplot2", quietly = TRUE) && requireNamespa
 
 cat("\nDone. Tables and figures written to:", normalizePath(OUT_DIR), "\n")
 
-# Results report
-# Print the results calculated above; no models are refitted here.
 
-# Formatting helpers
-
-report_heading <- function(title) {
-  cat("\n\n")
-  cat(strrep("=", 90), "\n")
-  cat(toupper(title), "\n")
-  cat(strrep("=", 90), "\n")
-}
-
-report_subheading <- function(title) {
-  cat("\n", strrep("-", 75), "\n", sep = "")
-  cat(title, "\n")
-  cat(strrep("-", 75), "\n", sep = "")
-}
-
-report_table <- function(x, digits = 3) {
-  if (is.null(x) || !NROW(x)) {
-    cat("No results available.\n")
-  } else {
-    print(
-      as.data.frame(x),
-      digits = digits,
-      row.names = FALSE,
-      right = FALSE
-    )
-  }
-}
-
-report_value <- function(label, value) {
-  cat(sprintf("%-42s %s\n", paste0(label, ":"), value))
-}
-
-# Widen the console for the tables below.
-old_width <- getOption("width")
-options(width = 160)
-
-# Data description and monthly coverage
-
-report_heading("1. DATA DESCRIPTION AND MONTHLY COVERAGE")
-
-report_value("Raw rows read", format(nrow(df), big.mark = ","))
-report_value("Unparseable dates", n_bad)
-report_value("Rows outside analysis window", nrow(outside))
-report_value("Monthly observations", n)
-report_value("First month", format(min(delta_df$month), "%B %Y"))
-report_value("Last month", format(max(delta_df$month), "%B %Y"))
-report_value("Total comments in analysis window", format(sum(cover$n_comments), big.mark = ","))
-report_value("Delta standard deviation", round(sd(delta_df$delta), 4))
-
-report_subheading("Monthly comment counts and date coverage")
-
-coverage_report <- cover %>%
-  mutate(
-    month = format(month, "%b %Y"),
-    n_comments = format(n_comments, big.mark = ","),
-    coverage = paste0(n_days, "/", days_in_month),
-    pct_days = paste0(pct_days, "%"),
-    flag_thin = ifelse(flag_thin, "Yes", "No")
-  ) %>%
-  select(month, n_comments, coverage, pct_days, flag_thin)
-
-report_table(coverage_report)
-
-report_value(
-  "Months with at least one uncovered day",
-  paste0(sum(cover$n_days < cover$days_in_month), " of ", nrow(cover))
-)
-
-report_value(
-  "Range of days covered",
-  paste0(min(cover$pct_days), "% to ", max(cover$pct_days), "%")
-)
-
-report_value(
-  "Months flagged as thin/gappy",
-  if (length(thin_months)) {
-    paste(format(thin_months, "%b %Y"), collapse = ", ")
-  } else {
-    "None"
-  }
-)
-
-report_subheading("Event-period coding")
-
-event_coding_report <- data.frame(
-  Event = c("COVID-19", "Black Lives Matter", "US election"),
-  Months = c(
-    paste(format(COVID_MONTHS, "%b %Y"), collapse = ", "),
-    paste(format(BLM_MONTHS, "%b %Y"), collapse = ", "),
-    paste(format(ELECTION_MONTHS, "%b %Y"), collapse = ", ")
-  )
-)
-
-report_table(event_coding_report)
-
-report_value(
-  "Reference months",
-  paste(
-    format(
-      delta_df$month[
-        rowSums(delta_df[, c("covid", "blm", "election")]) == 0
-      ],
-      "%b %Y"
-    ),
-    collapse = ", "
-  )
-)
-
-# Primary regression model
-
-report_heading("2. PRIMARY REDUCED REGRESSION MODEL")
-
-report_value("Model", "delta ~ time + covid + blm + election")
-report_value("Observations", nobs(m_red))
-report_value("Residual degrees of freedom", df.residual(m_red))
-report_value("R-squared", round(summary(m_red)$r.squared, 3))
-report_value("Adjusted R-squared", round(summary(m_red)$adj.r.squared, 3))
-report_value("Newey-West lag", NW_LAG)
-
-report_subheading("Primary model: OLS, Newey-West HAC and HC3")
-
-primary_report <- red_tab %>%
-  select(
-    term,
-    est,
-    se_ols,
-    p_ols,
-    se_hac,
-    p_hac,
-    p_hc3,
-    lo,
-    hi
-  ) %>%
-  rename(
-    Coefficient = term,
-    Estimate = est,
-    OLS_SE = se_ols,
-    OLS_p = p_ols,
-    HAC_SE = se_hac,
-    HAC_p = p_hac,
-    HC3_p = p_hc3,
-    HAC_CI_lower = lo,
-    HAC_CI_upper = hi
-  )
-
-report_table(primary_report, digits = 4)
-
-cat(
-  "\nNote: HAC confidence intervals use Newey-West standard errors",
-  "with a small-sample adjustment and a t reference distribution",
-  "with", df.residual(m_red), "residual degrees of freedom.\n"
-)
-
-report_subheading("Residual autocorrelation diagnostics")
-
-cat("\nBreusch-Godfrey test:\n")
-print(bgtest(m_red, order = 1))
-
-cat("\nDurbin-Watson test:\n")
-print(dwtest(m_red))
-
-report_value(
-  "Lag-1 residual autocorrelation",
-  round(acf(resid(m_red), plot = FALSE, lag.max = 1)$acf[2], 3)
-)
-
-report_subheading("Newey-West lag sensitivity")
-
-lag_report <- reshape(
-  lag_tab[, c("lag", "term", "p")],
-  idvar = "term",
-  timevar = "lag",
-  direction = "wide"
-)
-
-names(lag_report) <- sub("^p\\.", "HAC_p_lag_", names(lag_report))
-
-report_table(lag_report, digits = 4)
-
-# Supplementary interaction model
-
-report_heading("3. SUPPLEMENTARY FULL MODEL WITH INTERACTIONS")
-
-report_value("Model", "delta ~ time + covid + blm + election + time:event interactions")
-report_value("Observations", nobs(m_full))
-report_value("Number of parameters", length(coef(m_full)))
-report_value("Residual degrees of freedom", df.residual(m_full))
-report_value("R-squared", round(summary(m_full)$r.squared, 3))
-report_value("Adjusted R-squared", round(summary(m_full)$adj.r.squared, 3))
-
-report_subheading("Full-model OLS coefficients")
-
-full_report <- as.data.frame(summary(m_full)$coefficients)
-full_report$Term <- rownames(full_report)
-rownames(full_report) <- NULL
-full_report <- full_report %>%
-  select(Term, everything())
-
-report_table(full_report, digits = 4)
-
-report_subheading("Mean event effects at observed event months")
-
-mean_event_report <- data.frame(
-  Event = names(me_full),
-  Mean_event_effect = as.numeric(me_full)
-)
-
-report_table(mean_event_report, digits = 4)
-
-report_value(
-  "Maximum leverage",
-  round(max(lev), 4)
-)
-
-report_value(
-  "Months with leverage above .99",
-  if (any(lev > .99)) {
-    paste(format(delta_df$month[lev > .99], "%b %Y"), collapse = ", ")
-  } else {
-    "None"
-  }
-)
-
-cat(
-  "\nInterpretation note: the full interaction model is supplementary.",
-  "Election-month leverage is approximately 1, so its election-related",
-  "coefficients should not be interpreted as reliable inferential estimates.\n"
-)
-
-# Wild bootstrap intervals
-
-report_heading("4. WILD BOOTSTRAP CONFIDENCE INTERVALS")
-
-report_value("Bootstrap draws", B_BOOT)
-report_value("Bootstrap method", "Webb weights with leverage adjustment")
-
-report_subheading("95% percentile confidence intervals")
-
-bootstrap_report <- wb_tab %>%
-  mutate(
-    CI_excludes_zero = ifelse(ci_excludes_zero, "Yes", "No")
-  ) %>%
-  select(
-    Term = term,
-    Estimate = estimate,
-    CI_lower = ci_low,
-    CI_upper = ci_high,
-    CI_excludes_zero
-  )
-
-report_table(bootstrap_report, digits = 4)
-
-# Leave-one-month-out analysis
-
-report_heading("5. LEAVE-ONE-MONTH-OUT SENSITIVITY ANALYSIS")
-
-report_value("Refitted models", nrow(loo) / length(unique(loo$term)))
-
-report_subheading("Coefficient ranges across leave-one-month-out models")
-
-loo_report <- loo_sum %>%
-  rename(
-    Coefficient = term,
-    Minimum_estimate = est_min,
-    Maximum_estimate = est_max,
-    Sign_changes = sign_changes,
-    Fits_with_OLS_p_below_.05 = n_p_below_05,
-    Total_fits = n_fits
-  )
-
-report_table(loo_report, digits = 4)
-
-# Placebo breakpoint analysis
-
-report_heading("6. PLACEBO BREAKPOINT ANALYSIS")
-
-report_value("Actual breakpoint", format(actual_cut, "%d %B %Y"))
-report_value("Absolute t-statistic at actual breakpoint", round(t_actual, 3))
-report_value(
-  "Proportion of candidate cuts with equal or larger absolute t",
-  round(mean(plc$abs_t >= t_actual), 3)
-)
-
-report_subheading("Candidate placebo breakpoints")
-
-placebo_report <- plc %>%
-  mutate(cut = format(cut, "%b %Y")) %>%
-  rename(
-    Breakpoint = cut,
-    Estimate = est,
-    T_statistic = t,
-    Absolute_T = abs_t
-  )
-
-report_table(placebo_report, digits = 3)
-
-cat(
-  "\nNote: the proportion is descriptive and should not be interpreted",
-  "as a formal permutation p-value.\n"
-)
-
-# Simulation sensitivity analysis
-
-report_heading("7. DESIGN-MATCHED SIMULATION SENSITIVITY ANALYSIS")
-
-report_value("Primary model", "delta ~ time + covid + blm + election")
-report_value("Observations", n)
-report_value("Residual SD used in simulation", round(sigma_sim, 4))
-report_value("Estimated AR(1) rho", round(rho_sim, 3))
-report_value("Newey-West lag", NW_LAG)
-report_value("Simulations per effect size", B_SIM)
-report_value("Alpha", ALPHA_SIM)
-report_value("Target power", TARGET_POWER)
-
-report_subheading("Approximate 80% detectable effect thresholds")
-
-simulation_report <- mde_primary %>%
-  mutate(
-    reached_80_percent = ifelse(
-      reached_80_percent,
-      "Yes",
-      "No"
-    )
-  ) %>%
-  rename(
-    Coefficient = coefficient,
-    Detectable_effect = detectable_effect,
-    Detectable_effect_SD = detectable_effect_SD,
-    Achieved_power = achieved_power,
-    Reached_80_percent = reached_80_percent
-  )
-
-report_table(simulation_report, digits = 4)
-
-report_subheading("Simulation grid: power estimates")
-
-power_summary <- power_curves %>%
-  group_by(coefficient) %>%
-  summarise(
-    Minimum_effect = min(effect),
-    Maximum_effect = max(effect),
-    Minimum_power = min(power, na.rm = TRUE),
-    Maximum_power = max(power, na.rm = TRUE),
-    Valid_simulations = min(valid_simulations),
-    .groups = "drop"
-  )
-
-report_table(power_summary, digits = 4)
-
-cat(
-  "\nInterpretation note: these are conditional simulation-based",
-  "sensitivity estimates. Other coefficients are held at their",
-  "observed estimates. They are not retrospective or definitive",
-  "power estimates for the study.\n"
-)
-
-# TOST equivalence tests
-
-report_heading("8. TOST EQUIVALENCE TESTS")
-
-report_value("Smallest effect of interest", paste0("+/- ", SESOI_TOTAL_SD, " SD total change"))
-report_value("Standard error estimator", "HC3")
-report_value("Number of series tested", nrow(tost_all))
-
-report_subheading("Equivalence tests for delta and foundation series")
-
-tost_report <- tost_all %>%
-  mutate(
-    Equivalent = ifelse(equivalent, "Yes", "No")
-  ) %>%
-  rename(
-    Series = series,
-    Slope = slope,
-    Equivalence_bound = bound,
-    CI90_lower = ci90_lo,
-    CI90_upper = ci90_hi,
-    Total_change_SD_lower = total_change_sd_lo,
-    Total_change_SD_upper = total_change_sd_hi,
-    TOST_p = p_tost
-  )
-
-report_table(tost_report, digits = 4)
-
-cat(
-  "\nInterpretation note: failure to establish equivalence does not",
-  "demonstrate either stability or meaningful change. These tests",
-  "assess linear temporal slopes, not event-period contrasts.\n"
-)
-
-# Event coding and month-coverage sensitivity
-
-report_heading("9. EVENT-CODING AND THIN-MONTH SENSITIVITY")
-
-report_subheading("Newey-West sensitivity estimates")
-
-sensitivity_report <- sens %>%
-  rename(
-    Analysis = analysis,
-    N = n,
-    Coefficient = term,
-    Estimate = est,
-    HAC_SE = se,
-    HAC_p = p
-  )
-
-report_table(sensitivity_report, digits = 4)
-
-cat(
-  "\nNote: where months are omitted, HAC treats the remaining",
-  "observations as consecutive. Those estimates are approximate.\n"
-)
-
-# Bayesian analyses
-
-report_heading("10. INTEGRATED BAYESIAN ANALYSES")
-
-if (isTRUE(bayes_ok)) {
-  
-  report_value("BayesFactor analyses completed", "Yes")
-  report_value("Posterior draws per model", B_BAYES)
-  
-  # Predictor-level Bayes factors
-
-  report_subheading(
-    "A1. Predictor-level Bayes factors conditional on other predictors"
-  )
-  
-  report_table(
-    bf_predictor_tab,
-    digits = 4
-  )
-  
-  cat(
-    "\nInterpretation: BF01_excluding_vs_full compares the model",
-    "excluding a predictor with the complete primary model.",
-    "Values above 1 favour excluding the predictor; values below",
-    "1 favour retaining it, conditional on the other predictors.\n"
-  )
-  
-  # Model-level Bayes factors
-
-  report_subheading(
-    "A2. Model-level Bayes factors across prior widths"
-  )
-  
-  report_table(
-    bf_tab,
-    digits = 4
-  )
-  
-  cat(
-    "\nInterpretation: BF01 values above 1 favour the simpler model;",
-    "values below 1 favour the more complex model.",
-    "The events-given-time comparison evaluates the addition of",
-    "the three event indicators to the time-only model.",
-    "The interaction comparison evaluates the addition of the",
-    "three time-by-event interactions to the main-effects model.\n"
-  )
-  
-  # Four-predictor posterior estimates
-
-  report_subheading(
-    "A3. Posterior estimates for all four primary-model predictors"
-  )
-  
-  report_table(
-    posterior_tab,
-    digits = 4
-  )
-  
-  cat(
-    "\nInterpretation: these posterior estimates are conditional",
-    "coefficients from the complete reduced model.",
-    "The probability column reports the posterior probability",
-    "that the relevant coefficient is greater than zero.\n"
-  )
-  
-  # Time-only posterior slope
-
-  report_subheading(
-    "A3b. Time-only posterior slope"
-  )
-  
-  report_table(
-    posterior_time_only_summary,
-    digits = 4
-  )
-  
-  cat(
-    "\nInterpretation: this is the time slope from a separate",
-    "time-only model. It is not interchangeable with the",
-    "conditional time coefficient reported in A3.\n"
-  )
-  
-} else {
-  
-  cat(
-    "The integrated BayesFactor analyses did not complete.",
-    "Check the messages printed during Section 4 and confirm",
-    "that the BayesFactor package is installed.\n"
-  )
-  
-}
-
-# Optional brms results
-
-report_subheading("Optional brms prior-sensitivity analysis")
-
-if (isTRUE(RUN_BRMS) &&
-    is.data.frame(brm_tab) &&
-    nrow(brm_tab) > 0) {
-  
-  report_table(
-    brm_tab,
-    digits = 4
-  )
-  
-} else {
-  
-  cat(
-    "brms was not run. RUN_BRMS is currently FALSE,",
-    "or the optional analysis did not complete.\n"
-  )
-  
-}
-
-# Effect sizes and temporal trends
-
-report_heading("11. EFFECT SIZES AND TEMPORAL TRENDS")
-
-report_subheading("Overall moral polarity (delta)")
-
-delta_effect_report <- es_delta %>%
-  select(
-    series,
-    n,
-    ols_slope,
-    sen_slope,
-    total_change_sen,
-    std_slope_sd_per_month,
-    total_change_in_sd,
-    acf1,
-    mk_tau,
-    mk_p
-  )
-
-report_table(delta_effect_report, digits = 4)
-
-report_subheading("Ten foundation-level series")
-
-foundation_effect_report <- es_found %>%
-  select(
-    series,
-    n,
-    ols_slope,
-    sen_slope,
-    total_change_sen,
-    baseline,
-    pct_change_from_baseline,
-    std_slope_sd_per_month,
-    total_change_in_sd,
-    acf1,
-    mk_tau,
-    mk_p,
-    mk_p_fdr
-  )
-
-report_table(foundation_effect_report, digits = 4)
-
-cat(
-  "\nInterpretation note: percentage changes are relative to the",
-  BASELINE_N, "month baseline mean. Kendall p-values are unadjusted",
-  "for autocorrelation; foundation-level p-values are also shown",
-  "with Benjamini-Hochberg FDR adjustment.\n"
-)
-
-# Output files
-
-report_heading("12. OUTPUT FILES")
-
-output_files <- list.files(
-  OUT_DIR,
-  full.names = FALSE
-)
-
-cat("Output directory:", normalizePath(OUT_DIR), "\n\n")
-cat("Files generated:\n")
-cat(paste0(" - ", output_files, collapse = "\n"), "\n")
-
-# End of results report
-
-options(width = old_width)
-
-cat("\n\n")
-cat(strrep("=", 90), "\n")
-cat("END OF CONSOLIDATED RESULTS REPORT\n")
-cat(strrep("=", 90), "\n")
