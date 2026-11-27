@@ -16,6 +16,8 @@ This repository contains the research code, analytical workflows, and associated
 5. **Shannon Entropy, Segmented Regression, MannKendall and Sens slope:** 3 political dictionaries (i.e., policy_agendas_dict, lavergarry.lexicon & maerz.lexicon)
 6. **Extended Moral Foundations Dictionary Analysis:** Lexicon-based psycholinguistic analysis (Hopp et al., 2021; original source: https://github.com/medianeuroscience/emfd).
 7. **Robustness Checks for morality polarity:** Additional analyses assessing the stability and sensitivity of the findings.
+8. **LIWC-22 Pre-COVID vs COVID Comparison:** Mann-Whitney U tests on monthly mean
+   LIWC-22 scores (20 variables), with effect sizes and BH correction.
 
 ## References
 
