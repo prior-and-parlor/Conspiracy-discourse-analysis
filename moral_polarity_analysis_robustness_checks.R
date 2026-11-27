@@ -2,7 +2,6 @@
 # Primary model: delta ~ time + covid + blm + election (reduced, no interactions).
 # The full interaction model is in the supplement only: the two election
 # months have leverage of 1, so those terms can't be interpreted.
-# Dates in the CSV are day-first with mixed 2/4-digit years, hence dmy().
 # Run top to bottom: source("moral_polarity.R", echo = TRUE)
 
 suppressPackageStartupMessages({
@@ -28,18 +27,17 @@ B_BOOT         <- 5000     # wild bootstrap draws
 B_BAYES        <- 10000    # posterior draws per Bayesian model/prior specification
 B_SIM          <- 5000     # simulation draws per grid point (lower for a test run)
 SESOI_TOTAL_SD <- 0.5      # smallest effect of interest: total change over the
-# window in SD units. PLACEHOLDER: justify in the paper.
-RUN_BRMS       <- FALSE    # brms needs a Stan toolchain; blocked on your machine
+# window in SD units. 
+RUN_BRMS       <- FALSE    # brms needs a Stan toolchain
 MAKE_FIGURE    <- TRUE
 WINDOW_START   <- as.Date("2019-06-01")
 WINDOW_END     <- as.Date("2020-11-01")   # month-start date of the last month
-BASELINE_N     <- 7        # Phase 1 = Jun-Dec 2019 (matches the manuscript)
+BASELINE_N     <- 7        # Phase 1 = Jun-Dec 2019 
 dir.create(OUT_DIR, showWarnings = FALSE)
 
 
-# Event coding, month by month (printed below so it can go in
-# the Method verbatim). Decide deliberately: the PHEIC was 30 Jan 2020 (so Jan
-# could be coded COVID) and G. Floyd died 25 May 2020 (so May could be BLM).
+# Event coding, month by month. Decided deliberately: the PHEIC was 30 Jan 2020 (so Jan
+# could be coded COVID) and G. Floyd passed away on 25 May 2020 (so May could be BLM).
 # The alternative coding is run as a sensitivity analysis in section 3e.
 COVID_MONTHS    <- as.Date(c("2020-02-01", "2020-03-01", "2020-04-01", "2020-05-01"))
 BLM_MONTHS      <- as.Date(c("2020-06-01", "2020-07-01", "2020-08-01"))
@@ -77,8 +75,8 @@ if (nrow(outside) > 0) {
   df <- df %>% filter(month >= WINDOW_START, month <= WINDOW_END)
 }
 
-# Coverage per month (answers Reviewer 2's request for retained N, and shows
-# thin or gappy months). Report this as a supplementary table.
+# Coverage per month (request for retained N, and shows
+# thin or gappy months). Reported as a supplementary table.
 cover <- df %>%
   group_by(month) %>%
   summarise(n_comments = n(), n_days = n_distinct(date), .groups = "drop") %>%
@@ -974,7 +972,6 @@ if (!has_bf) {
     # ---------------------------------------------------------------
     # A3. POSTERIOR COEFFICIENT ESTIMATES: FOUR PREDICTORS
     # ---------------------------------------------------------------
-    #
     # Posterior distributions are obtained from the complete
     # primary reduced model.
     #
